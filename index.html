@@ -1,0 +1,1512 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TechRepair POS</title>
+<!-- Firebase -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js";
+  import { getFirestore, collection, doc, setDoc, getDocs, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyAT7eQ6mzhy6Y7hcmy_M5Dg0vqR9gSOLa8",
+    authDomain: "neotechpos-dc8c0.firebaseapp.com",
+    projectId: "neotechpos-dc8c0",
+    storageBucket: "neotechpos-dc8c0.firebasestorage.app",
+    messagingSenderId: "602057659906",
+    appId: "1:602057659906:web:1efe394ab7d74ca0a7391b"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db  = getFirestore(app);
+
+  // ── Guardar en Firestore ──
+  window.fbSave = async (colName, id, data) => {
+    try { await setDoc(doc(db, colName, String(id)), data); } catch(e){ console.error('fbSave',e); }
+  };
+  window.fbDelete = async (colName, id) => {
+    try { await deleteDoc(doc(db, colName, String(id))); } catch(e){ console.error('fbDelete',e); }
+  };
+
+  // ── Escuchar cambios en tiempo real ──
+  function listenCol(colName, setter) {
+    onSnapshot(collection(db, colName), snap => {
+      const items = [];
+      snap.forEach(d => items.push(d.data()));
+      setter(items);
+      renderAll();
+      updateBadges();
+    });
+  }
+
+  // Esperar a que el resto del JS cargue antes de conectar
+  window.addEventListener('load', () => {
+    listenCol('products',     items => { products     = items; });
+    listenCol('repairs',      items => { repairs      = items; });
+    listenCol('salesHistory', items => { salesHistory = items; });
+  });
+</script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', sans-serif; background: #0d1117; color: #e2e8f0; min-height: 100vh; }
+
+  /* TOPBAR */
+  #topbar { background: #111827; border-bottom: 2px solid #f97316; height: 60px; display: flex; align-items: center; padding: 0 20px; gap: 16px; position: sticky; top: 0; z-index: 50; }
+  #hamburger { background: #f97316; border: none; border-radius: 10px; width: 46px; height: 46px; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; flex-shrink: 0; }
+  #hamburger span { display: block; width: 22px; height: 2px; background: #fff; border-radius: 2px; }
+  #logo { font-weight: 800; font-size: 17px; color: #fff; }
+  #logo em { color: #f97316; font-style: normal; }
+  #page-title { margin-left: auto; font-size: 13px; color: #64748b; }
+
+  /* OVERLAY & DRAWER */
+  #overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 98; }
+  #drawer { position: fixed; top: 0; left: 0; height: 100%; width: 260px; background: #111827; border-right: 2px solid #f97316; transform: translateX(-260px); transition: transform 0.25s ease; z-index: 99; display: flex; flex-direction: column; }
+  #drawer.open { transform: translateX(0); }
+  #drawer-header { background: linear-gradient(135deg,#f97316,#ea580c); padding: 20px 18px; display: flex; align-items: center; gap: 12px; }
+  #drawer-close { margin-left: auto; background: rgba(0,0,0,0.2); border: none; border-radius: 8px; width: 32px; height: 32px; cursor: pointer; color: #fff; font-size: 18px; display: flex; align-items: center; justify-content: center; }
+  #nav-list { flex: 1; padding: 16px 12px; }
+  .nav-label-section { font-size: 10px; color: #4b5563; font-weight: 700; letter-spacing: 1px; padding: 0 10px; margin-bottom: 10px; display: block; }
+  .nav-item { display: flex; align-items: center; gap: 12px; padding: 13px 14px; border-radius: 10px; cursor: pointer; margin-bottom: 4px; border: 1px solid transparent; color: #9ca3af; transition: all 0.15s; }
+  .nav-item:hover { background: rgba(249,115,22,0.08); color: #e2e8f0; }
+  .nav-item.active { background: rgba(249,115,22,0.18); border-color: rgba(249,115,22,0.35); color: #f97316; font-weight: 700; }
+  .nav-badge { margin-left: auto; color: #fff; border-radius: 20px; font-size: 11px; font-weight: 700; padding: 2px 8px; }
+  #drawer-footer { padding: 14px 18px; border-top: 1px solid #1e2d3d; }
+  .footer-row { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 12px; }
+
+  /* PAGES */
+  #content { padding: 20px; max-width: 1200px; margin: 0 auto; }
+  .page { display: none; }
+  .page.active { display: block; }
+  h2 { font-size: 18px; font-weight: 800; margin-bottom: 16px; }
+
+  /* CARDS */
+  .card { background: #111827; border: 1px solid #1e2d3d; border-radius: 14px; padding: 20px; margin-bottom: 16px; }
+
+  /* BUTTONS */
+  .btn { border-radius: 8px; padding: 8px 16px; cursor: pointer; font-size: 13px; font-weight: 600; border: 1px solid #2d3748; background: #1e2433; color: #94a3b8; font-family: inherit; }
+  .btn-primary { background: linear-gradient(135deg,#f97316,#ea580c); color: #fff; border: none; }
+  .btn-danger { background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+  .btn-success { background: rgba(16,185,129,0.15); color: #10b981; border: 1px solid rgba(16,185,129,0.3); }
+  .btn-blue { background: rgba(59,130,246,0.15); color: #3b82f6; border: 1px solid rgba(59,130,246,0.3); }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+  .btn-full { width: 100%; padding: 12px; font-size: 14px; margin-top: 8px; }
+
+  /* INPUTS */
+  input, select, textarea { background: #1a1f2e; border: 1px solid #2d3748; border-radius: 8px; padding: 9px 12px; color: #e2e8f0; font-size: 13px; width: 100%; outline: none; font-family: inherit; }
+  input:focus, select:focus { border-color: #f97316; }
+  label { font-size: 10px; color: #64748b; font-weight: 700; letter-spacing: 0.8px; margin-bottom: 5px; display: block; }
+
+  /* TABLE */
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; padding: 10px 14px; font-size: 10px; color: #4b5563; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; border-bottom: 1px solid #1e2d3d; }
+  td { padding: 12px 14px; font-size: 13px; border-bottom: 1px solid #161f2e; vertical-align: middle; }
+
+  /* BADGE */
+  .badge { border-radius: 20px; padding: 3px 10px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+
+  /* ══════════════════════════════
+     PUNTO DE VENTA — NUEVO DISEÑO
+  ══════════════════════════════ */
+  #pos-layout { display: grid; grid-template-columns: 1fr 340px; gap: 20px; min-height: calc(100vh - 120px); }
+
+  /* Tabs dentro del POS */
+  .pos-tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+  .pos-tab { flex: 1; padding: 12px; border-radius: 10px; cursor: pointer; font-size: 14px; font-weight: 600; text-align: center; border: 1px solid #2d3748; color: #64748b; background: #1e2433; transition: all 0.15s; }
+  .pos-tab.active { background: linear-gradient(135deg,#f97316,#ea580c); color: #fff; border-color: transparent; }
+
+  /* Panel izquierdo del POS */
+  .pos-panel { display: none; }
+  .pos-panel.active { display: block; }
+
+  /* Buscador con lector */
+  #barcode-section { background: #111827; border: 2px solid #1e2d3d; border-radius: 14px; padding: 16px; margin-bottom: 16px; }
+  #barcode-section.scanning { border-color: #f97316; }
+  .barcode-row { display: flex; gap: 10px; align-items: center; }
+  #barcode-input { font-size: 15px; padding: 11px 14px; letter-spacing: 1px; }
+  #barcode-btn { background: #f97316; border: none; border-radius: 8px; padding: 11px 16px; cursor: pointer; font-size: 18px; flex-shrink: 0; }
+  #barcode-result { margin-top: 12px; display: none; }
+
+  /* Product grid */
+  #product-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
+  .product-card { background: #111827; border: 1px solid #1e2d3d; border-radius: 12px; padding: 14px; cursor: pointer; transition: all 0.15s; }
+  .product-card:hover:not(.disabled) { border-color: #f97316; transform: translateY(-1px); }
+  .product-card.disabled { opacity: 0.4; cursor: not-allowed; }
+  .product-card.in-cart { border-color: #f97316; background: rgba(249,115,22,0.05); }
+
+  /* Formulario de reparación */
+  .rep-form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .rep-form .span2 { grid-column: span 2; }
+  .tipo-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 4px; }
+  .tipo-btn { padding: 8px; border-radius: 8px; border: 1px solid #2d3748; background: #1e2433; color: #9ca3af; cursor: pointer; font-size: 12px; text-align: center; transition: all 0.15s; font-family: inherit; }
+  .tipo-btn.active { border-color: #f97316; background: rgba(249,115,22,0.15); color: #f97316; font-weight: 700; }
+
+  /* Ticket (lado derecho) */
+  #ticket-panel { position: sticky; top: 78px; height: fit-content; }
+  .ticket-section-title { font-size: 11px; font-weight: 700; letter-spacing: 0.8px; color: #4b5563; text-transform: uppercase; margin: 16px 0 10px; }
+  .ticket-item { background: #0d1117; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+  .ticket-item-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .ticket-item-bot { display: flex; align-items: center; justify-content: space-between; }
+  .qty-row { display: flex; align-items: center; gap: 8px; }
+  .qty-btn { width: 26px; height: 26px; border-radius: 6px; border: 1px solid #2d3748; background: #1e2433; color: #e2e8f0; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; }
+
+  /* Ticket repair entry */
+  .rep-ticket { background: #0d1117; border-radius: 8px; padding: 12px; margin-bottom: 8px; border-left: 3px solid #3b82f6; }
+
+  /* Totals */
+  .ticket-line { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; border-bottom: 1px solid #1e2d3d; }
+  .ticket-total-line { display: flex; justify-content: space-between; padding: 14px 0 8px; font-weight: 800; font-size: 20px; }
+  .ticket-pendiente { display: flex; justify-content: space-between; padding: 6px 0; }
+
+  /* Anticipo section */
+  #anticipo-section { background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2); border-radius: 10px; padding: 14px; margin: 12px 0; }
+  #anticipo-section label { color: #3b82f6; }
+  .anticipo-row { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+  #anticipo-input { flex: 1; }
+  #anticipo-btn { background: #3b82f6; color: #fff; border: none; border-radius: 8px; padding: 9px 14px; cursor: pointer; font-weight: 700; font-size: 13px; white-space: nowrap; font-family: inherit; }
+
+  /* LISTOS */
+  #listos-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(280px,1fr)); gap: 16px; }
+  .listo-card { background: #111827; border: 1px solid #1e2d3d; border-left: 3px solid #10b981; border-radius: 14px; padding: 20px; }
+
+  /* MODAL */
+  .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); backdrop-filter: blur(6px); align-items: center; justify-content: center; z-index: 200; padding: 20px; }
+  .modal.open { display: flex; }
+  .modal-box { background: #111827; border: 1px solid #1e2d3d; border-radius: 16px; padding: 28px; width: 100%; max-width: 560px; max-height: 90vh; overflow-y: auto; }
+
+  /* TOAST */
+  #toast { display: none; position: fixed; bottom: 24px; right: 24px; background: #10b981; color: #fff; padding: 12px 20px; border-radius: 10px; font-weight: 700; font-size: 14px; z-index: 300; box-shadow: 0 4px 24px rgba(16,185,129,0.4); }
+
+  .empty { text-align: center; color: #4b5563; padding: 40px; }
+  .divider { height: 1px; background: #1e2d3d; margin: 12px 0; }
+
+  /* SALDOS PENDIENTES */
+  .saldo-card { background: #111827; border: 1px solid #1e2d3d; border-radius: 12px; padding: 16px; margin-bottom: 12px; transition: border-color 0.15s; }
+  .saldo-card:hover { border-color: #f59e0b; }
+  .saldo-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+  .saldo-info { display: flex; gap: 10px; align-items: center; }
+  .saldo-avatar { width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg,#f97316,#ea580c); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 16px; color: #fff; flex-shrink: 0; }
+  .saldo-bar-bg { background: #1e2d3d; border-radius: 20px; height: 6px; margin: 10px 0 6px; overflow: hidden; }
+  .saldo-bar-fill { height: 100%; border-radius: 20px; transition: width 0.4s ease; }
+  .saldo-amounts { display: flex; justify-content: space-between; font-size: 12px; }
+  .saldo-filter-row { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .saldo-filter-btn { padding: 6px 14px; border-radius: 20px; border: 1px solid #2d3748; background: #1e2433; color: #64748b; cursor: pointer; font-size: 12px; font-weight: 600; font-family: inherit; transition: all 0.15s; }
+  .saldo-filter-btn.active { background: rgba(245,158,11,0.18); border-color: rgba(245,158,11,0.4); color: #f59e0b; }
+  .saldo-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-bottom: 20px; }
+  .saldo-stat-card { background: #111827; border: 1px solid #1e2d3d; border-radius: 12px; padding: 14px; text-align: center; }
+  .abono-modal-box { background: #111827; border: 1px solid #1e2d3d; border-radius: 16px; padding: 28px; width: 100%; max-width: 400px; }
+  .historial-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: #0d1117; border-radius: 8px; margin-bottom: 6px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<!-- TOPBAR -->
+<div id="topbar">
+  <button id="hamburger" onclick="openMenu()">
+    <span></span><span></span><span></span>
+  </button>
+  <div id="logo">🔧 TechRepair <em>POS</em></div>
+  <div id="page-title">🛒 Punto de Venta</div>
+</div>
+
+<!-- OVERLAY -->
+<div id="overlay" onclick="closeMenu()"></div>
+
+<!-- DRAWER -->
+<div id="drawer">
+  <div id="drawer-header">
+    <span style="font-size:28px">🔧</span>
+    <div>
+      <div style="font-weight:800;font-size:15px;color:#fff">TechRepair</div>
+      <div style="font-size:11px;color:rgba(255,255,255,0.7)">Punto de Venta</div>
+    </div>
+    <button id="drawer-close" onclick="closeMenu()">✕</button>
+  </div>
+  <div id="nav-list">
+    <span class="nav-label-section">MENÚ</span>
+    <div class="nav-item active" onclick="navigate('pos')" id="nav-pos"><span style="font-size:20px">🛒</span><span style="font-size:14px">Punto de Venta</span></div>
+    <div class="nav-item" onclick="navigate('inventario')" id="nav-inventario"><span style="font-size:20px">📦</span><span style="font-size:14px">Inventario</span><span class="nav-badge" id="badge-stock" style="background:#ef4444;display:none"></span></div>
+    <div class="nav-item" onclick="navigate('reparaciones')" id="nav-reparaciones"><span style="font-size:20px">🔧</span><span style="font-size:14px">Reparaciones</span><span class="nav-badge" id="badge-rep" style="background:#3b82f6;display:none"></span></div>
+    <div class="nav-item" onclick="navigate('listos')" id="nav-listos"><span style="font-size:20px">✅</span><span style="font-size:14px">Listos</span><span class="nav-badge" id="badge-listos" style="background:#10b981;display:none"></span></div>
+    <div class="nav-item" onclick="navigate('ventas')" id="nav-ventas"><span style="font-size:20px">📈</span><span style="font-size:14px">Reporte de Ventas</span></div>
+  </div>
+  <div id="drawer-footer">
+    <div style="font-size:10px;color:#4b5563;font-weight:700;letter-spacing:.8px;margin-bottom:10px">RESUMEN</div>
+    <div class="footer-row"><span style="color:#64748b">Reparaciones activas</span><span id="stat-activas" style="color:#3b82f6;font-weight:700">0</span></div>
+    <div class="footer-row"><span style="color:#64748b">Listos por entregar</span><span id="stat-listos" style="color:#10b981;font-weight:700">0</span></div>
+    <div class="footer-row"><span style="color:#64748b">Stock bajo</span><span id="stat-stock" style="color:#ef4444;font-weight:700">0</span></div>
+  </div>
+</div>
+
+<!-- CONTENT -->
+<div id="content">
+
+  <!-- ══ PUNTO DE VENTA ══ -->
+  <div class="page active" id="page-pos">
+    <div id="pos-layout">
+
+      <!-- IZQUIERDA -->
+      <div>
+        <!-- Tabs -->
+        <div class="pos-tabs">
+          <div class="pos-tab active" id="tab-accesorios" onclick="switchPosTab('accesorios')">🛒 Accesorios</div>
+          <div class="pos-tab" id="tab-reparacion" onclick="switchPosTab('reparacion')">🔧 Reparación</div>
+          <div class="pos-tab" id="tab-saldos" onclick="switchPosTab('saldos')">💰 Saldos Pendientes <span id="badge-saldos-tab" style="display:none;background:#f59e0b;color:#000;border-radius:20px;font-size:10px;font-weight:800;padding:1px 6px;margin-left:4px"></span></div>
+        </div>
+
+        <!-- PANEL: ACCESORIOS -->
+        <div class="pos-panel active" id="panel-accesorios">
+          <!-- Lector de barras -->
+          <div id="barcode-section">
+            <label>LECTOR DE CÓDIGO DE BARRAS / BÚSQUEDA RÁPIDA</label>
+            <div class="barcode-row">
+              <input type="text" id="barcode-input" placeholder="Escanea o escribe código / nombre del producto..." oninput="onBarcodeInput()" onkeydown="onBarcodeKey(event)" autofocus>
+              <button id="barcode-btn" onclick="focusBarcode()" title="Clic aquí y luego escanea">📷</button>
+            </div>
+            <div id="barcode-result"></div>
+          </div>
+
+          <!-- Grid de productos -->
+          <div style="font-size:11px;color:#4b5563;font-weight:700;letter-spacing:.8px;margin-bottom:10px">TODOS LOS PRODUCTOS</div>
+          <div id="product-grid"></div>
+        </div>
+
+        <!-- PANEL: REPARACIÓN -->
+        <div class="pos-panel" id="panel-reparacion">
+          <div class="card" style="margin-bottom:0">
+            <div style="font-weight:800;font-size:15px;margin-bottom:18px;color:#3b82f6">🔧 Datos de la Reparación</div>
+            <div class="rep-form">
+              <div>
+                <label>NOMBRE DEL CLIENTE *</label>
+                <input type="text" id="rep-cliente" placeholder="Nombre completo">
+              </div>
+              <div>
+                <label>NÚMERO DE TELÉFONO</label>
+                <input type="text" id="rep-telefono" placeholder="555-0000">
+              </div>
+              <div>
+                <label>MODELO DEL EQUIPO *</label>
+                <input type="text" id="rep-modelo" placeholder="iPhone 14, Samsung S23, PS5...">
+              </div>
+              <div>
+                <label>NÚMERO DE SERIE / IMEI</label>
+                <input type="text" id="rep-serie" placeholder="Opcional">
+              </div>
+              <div class="span2">
+                <label>TIPO DE REPARACIÓN</label>
+                <div class="tipo-grid" id="tipo-grid">
+                  <button class="tipo-btn active" onclick="selectTipo(this,'Pantalla')">📱 Pantalla</button>
+                  <button class="tipo-btn" onclick="selectTipo(this,'Batería')">🔋 Batería</button>
+                  <button class="tipo-btn" onclick="selectTipo(this,'Carga')">⚡ Puerto carga</button>
+                  <button class="tipo-btn" onclick="selectTipo(this,'Software')">💻 Software</button>
+                  <button class="tipo-btn" onclick="selectTipo(this,'Agua')">💧 Daño por agua</button>
+                  <button class="tipo-btn" onclick="selectTipo(this,'Otro')">🔩 Otro</button>
+                </div>
+                <input type="text" id="rep-tipo-custom" placeholder="O describe el tipo de reparación..." style="margin-top:8px">
+              </div>
+              <div class="span2">
+                <label>DESCRIPCIÓN DEL PROBLEMA</label>
+                <input type="text" id="rep-problema" placeholder="Detalla el problema del equipo">
+              </div>
+              <div>
+                <label>COSTO TOTAL ($)</label>
+                <input type="number" id="rep-costo" placeholder="0" oninput="updateRepTicket()">
+              </div>
+              <div>
+                <label>ANTICIPO INICIAL ($)</label>
+                <input type="number" id="rep-anticipo-inicial" placeholder="0" oninput="updateRepTicket()">
+              </div>
+              <div class="span2">
+                <label>FECHA ESTIMADA DE ENTREGA</label>
+                <input type="date" id="rep-fecha">
+              </div>
+              <div class="span2">
+                <label>NOTAS INTERNAS</label>
+                <input type="text" id="rep-notas" placeholder="Contraseña, accesorios entregados, observaciones...">
+              </div>
+            </div>
+            <button class="btn btn-blue btn-full" style="margin-top:16px" onclick="addRepairToTicket()">➕ Agregar al ticket</button>
+          </div>
+        </div>
+
+        <!-- PANEL: SALDOS PENDIENTES -->
+        <div class="pos-panel" id="panel-saldos">
+          <div class="saldo-stats" id="saldo-stats"></div>
+          <div class="saldo-filter-row">
+            <button class="saldo-filter-btn active" onclick="filterSaldos('todos',this)">Todos</button>
+            <button class="saldo-filter-btn" onclick="filterSaldos('reparacion',this)">🔧 Reparaciones</button>
+            <button class="saldo-filter-btn" onclick="filterSaldos('venta',this)">🛒 Ventas</button>
+            <button class="saldo-filter-btn" onclick="filterSaldos('urgente',this)">🔴 Urgentes (+7 días)</button>
+          </div>
+          <div id="saldos-list"></div>
+        </div>
+      </div>
+
+      <!-- DERECHA: TICKET -->
+      <div id="ticket-panel">
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <div style="font-weight:800;font-size:16px">🧾 Ticket</div>
+            <button class="btn btn-danger btn-sm" onclick="clearAll()" id="btn-clear" style="display:none">Limpiar</button>
+          </div>
+          <div style="font-size:11px;color:#4b5563" id="ticket-date"></div>
+
+          <!-- Items accesorios -->
+          <div id="ticket-accesorios-section" style="display:none">
+            <div class="ticket-section-title">🛒 Accesorios</div>
+            <div id="ticket-items"></div>
+          </div>
+
+          <!-- Items reparaciones -->
+          <div id="ticket-repairs-section" style="display:none">
+            <div class="ticket-section-title">🔧 Reparaciones</div>
+            <div id="ticket-repairs"></div>
+          </div>
+
+          <!-- Empty state -->
+          <div id="ticket-empty" style="text-align:center;color:#4b5563;padding:40px 0;font-size:13px">
+            Agrega productos o una reparación
+          </div>
+
+          <!-- Totales -->
+          <div id="ticket-totals" style="display:none">
+            <div class="divider"></div>
+            <div class="ticket-line" id="line-accesorios" style="display:none">
+              <span style="color:#64748b">Accesorios</span><span id="total-accesorios">$0</span>
+            </div>
+            <div class="ticket-line" id="line-reparaciones" style="display:none">
+              <span style="color:#64748b">Reparaciones</span><span id="total-reparaciones">$0</span>
+            </div>
+            <div class="ticket-total-line">
+              <span>Total</span><span style="color:#f97316" id="total-general">$0</span>
+            </div>
+
+            <!-- Anticipo -->
+            <div id="anticipo-section">
+              <label style="color:#3b82f6">ANTICIPO / ABONO</label>
+              <div class="anticipo-row">
+                <input type="number" id="anticipo-input" placeholder="Monto del anticipo" oninput="updateTotals()">
+                <button id="anticipo-btn" onclick="applyAnticipo()">Aplicar</button>
+              </div>
+              <div id="anticipo-aplicados" style="margin-top:8px"></div>
+            </div>
+
+            <div style="background:#0d1117;border-radius:10px;padding:12px;margin-bottom:12px">
+              <div class="ticket-pendiente">
+                <span style="color:#64748b;font-size:13px">Total anticipos</span>
+                <span id="total-anticipos" style="color:#3b82f6;font-weight:700">$0</span>
+              </div>
+              <div class="ticket-pendiente" style="border-top:1px solid #1e2d3d;padding-top:8px;margin-top:4px">
+                <span style="font-weight:800;font-size:16px">Pendiente por cobrar</span>
+                <span id="total-pendiente" style="font-weight:800;font-size:18px;color:#f97316">$0</span>
+              </div>
+            </div>
+
+            <button class="btn btn-primary btn-full" onclick="finalizeSale()">✅ Cobrar / Registrar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ INVENTARIO ══ -->
+  <div class="page" id="page-inventario">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+      <h2 style="margin:0">📦 Inventario</h2>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <input type="text" id="search-inv" placeholder="🔍 Buscar producto..." style="width:220px;padding:8px 12px" oninput="renderInventory()">
+        <label style="background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:none;border-radius:8px;padding:9px 16px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;letter-spacing:normal">
+          📊 Importar Excel
+          <input type="file" id="excel-import" accept=".xls,.xlsx,.csv" style="display:none" onchange="importExcel(this)">
+        </label>
+        <button class="btn" onclick="exportTemplate()" style="font-size:12px;padding:8px 12px">⬇ Plantilla</button>
+        <button class="btn btn-primary" onclick="openProductModal()">+ Agregar</button>
+      </div>
+    </div>
+
+    <!-- Import status -->
+    <div id="import-status" style="display:none;margin-bottom:16px"></div>
+
+    <!-- Stats -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px" id="inv-stats"></div>
+
+    <div class="card" style="padding:0;overflow:hidden">
+      <table>
+        <thead><tr><th>Código</th><th>Descripción</th><th>Categoría</th><th>P. Costo</th><th>P. Venta</th><th>Existencia</th><th>Estado</th><th>Ajustar</th></tr></thead>
+        <tbody id="inventory-table"></tbody>
+      </table>
+      <div id="inv-pagination" style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-top:1px solid #1e2d3d;font-size:13px;color:#64748b"></div>
+    </div>
+  </div>
+
+  <!-- ══ REPARACIONES ══ -->
+  <div class="page" id="page-reparaciones">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <h2 style="margin:0">🔧 Reparaciones</h2>
+    </div>
+    <input type="text" id="search-repair" placeholder="🔍 Buscar cliente o equipo..." style="max-width:300px;margin-bottom:16px" oninput="renderRepairs()">
+    <div class="card">
+      <table>
+        <thead><tr><th>#</th><th>Cliente</th><th>Equipo</th><th>Reparación</th><th>Estado</th><th>Costo / Anticipo / Pendiente</th><th></th></tr></thead>
+        <tbody id="repairs-table"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ══ LISTOS ══ -->
+  <div class="page" id="page-listos">
+    <h2>✅ Listos para entregar</h2>
+    <div id="listos-grid"></div>
+  </div>
+
+  <!-- ══ REPORTE DE VENTAS ══ -->
+  <div class="page" id="page-ventas">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:10px">
+      <h2 style="margin:0">📈 Reporte de Ventas</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" id="vfil-hoy"    onclick="setVentasFiltro('hoy',this)"    style="font-size:12px;padding:7px 14px">Hoy</button>
+        <button class="btn" id="vfil-semana" onclick="setVentasFiltro('semana',this)" style="font-size:12px;padding:7px 14px">Esta semana</button>
+        <button class="btn" id="vfil-mes"    onclick="setVentasFiltro('mes',this)"    style="font-size:12px;padding:7px 14px">Este mes</button>
+        <button class="btn" id="vfil-todo"   onclick="setVentasFiltro('todo',this)"   style="font-size:12px;padding:7px 14px;background:rgba(249,115,22,0.18);color:#f97316;border-color:rgba(249,115,22,0.35)">Todas</button>
+      </div>
+    </div>
+    <!-- KPIs -->
+    <div id="ventas-kpis" style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px"></div>
+    <!-- Gráficas -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+      <div class="card" style="padding:16px">
+        <div style="font-size:11px;color:#64748b;font-weight:700;letter-spacing:.8px;margin-bottom:14px">INGRESOS POR DÍA</div>
+        <canvas id="chart-ingresos" height="160"></canvas>
+      </div>
+      <div class="card" style="padding:16px">
+        <div style="font-size:11px;color:#64748b;font-weight:700;letter-spacing:.8px;margin-bottom:14px">DISTRIBUCIÓN POR TIPO</div>
+        <canvas id="chart-tipo" height="160"></canvas>
+      </div>
+    </div>
+    <!-- Tabla detalle -->
+    <div class="card" style="padding:0;overflow:hidden">
+      <div style="padding:14px 18px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #1e2d3d;flex-wrap:wrap;gap:10px">
+        <span style="font-weight:700;font-size:14px">Detalle de ventas</span>
+        <input type="text" id="search-ventas" placeholder="🔍 Buscar cliente o producto..." style="width:240px;padding:7px 12px;font-size:12px" oninput="renderVentasTabla()">
+      </div>
+      <table>
+        <thead><tr><th>#</th><th>Fecha / Hora</th><th>Cliente</th><th>Descripción</th><th>Tipo</th><th>Total</th><th>Cobrado</th><th>Pendiente</th><th>Estado</th><th></th></tr></thead>
+        <tbody id="ventas-tabla"></tbody>
+      </table>
+      <div id="ventas-pagination" style="padding:12px 16px;border-top:1px solid #1e2d3d;display:flex;justify-content:space-between;align-items:center;font-size:13px;color:#64748b"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- MODAL PRODUCTO -->
+<div class="modal" id="product-modal">
+  <div class="modal-box" style="max-width:400px">
+    <div style="font-weight:800;font-size:16px;margin-bottom:20px">📦 Nuevo producto</div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div><label>CÓDIGO DE BARRAS</label><input id="p-codigo" placeholder="Ej: 7501234567890"></div>
+      <div><label>NOMBRE *</label><input id="p-nombre" placeholder="Funda iPhone 15"></div>
+      <div><label>CATEGORÍA</label><input id="p-categoria" placeholder="Fundas, Cables..."></div>
+      <div><label>PRECIO ($)</label><input type="number" id="p-precio" placeholder="0"></div>
+      <div><label>STOCK INICIAL</label><input type="number" id="p-stock" placeholder="0"></div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
+      <button class="btn" onclick="closeProductModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveProduct()">💾 Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL ABONO -->
+<div class="modal" id="abono-modal">
+  <div class="abono-modal-box">
+    <div style="font-weight:800;font-size:16px;margin-bottom:4px">💵 Registrar Abono</div>
+    <div id="abono-cliente-info" style="font-size:13px;color:#64748b;margin-bottom:20px"></div>
+    <div style="background:#0d1117;border-radius:10px;padding:12px;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px">
+        <span style="color:#64748b">Total</span><span id="abono-total" style="font-weight:800;color:#f97316"></span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px">
+        <span style="color:#64748b">Ya pagado</span><span id="abono-pagado" style="color:#3b82f6;font-weight:700"></span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:14px;border-top:1px solid #1e2d3d;padding-top:8px;margin-top:4px">
+        <span style="font-weight:700">Pendiente</span><span id="abono-pendiente" style="font-weight:800;color:#f59e0b;font-size:16px"></span>
+      </div>
+    </div>
+    <div style="margin-bottom:16px">
+      <label>MONTO DEL ABONO ($)</label>
+      <input type="number" id="abono-monto" placeholder="0" style="font-size:18px;padding:12px" oninput="previewAbono()">
+      <div id="abono-preview" style="margin-top:8px;font-size:12px;color:#64748b;display:none"></div>
+    </div>
+    <div style="margin-bottom:16px">
+      <label>MÉTODO DE PAGO</label>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:6px">
+        <button class="tipo-btn active" id="pago-efectivo" onclick="selectPago(this,'Efectivo')">💵 Efectivo</button>
+        <button class="tipo-btn" id="pago-tarjeta" onclick="selectPago(this,'Tarjeta')">💳 Tarjeta</button>
+        <button class="tipo-btn" id="pago-transfer" onclick="selectPago(this,'Transferencia')">📲 Transferencia</button>
+      </div>
+    </div>
+    <div style="margin-bottom:16px">
+      <label>NOTA (OPCIONAL)</label>
+      <input type="text" id="abono-nota" placeholder="Ej: Pago parcial, queda a deber...">
+    </div>
+    <!-- Historial de abonos -->
+    <div id="abono-historial-section">
+      <div style="font-size:11px;color:#4b5563;font-weight:700;letter-spacing:.8px;margin-bottom:8px">HISTORIAL DE ABONOS</div>
+      <div id="abono-historial"></div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
+      <button class="btn" onclick="closeAbonoModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveAbono()">💾 Registrar abono</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast">✅ Registrado con éxito</div>
+
+<script>
+// ══ DATA ══
+let products = [];
+let repairs = [];
+
+let cart = [];          // { ...product, qty }
+let repairTicket = [];  // reparaciones en ticket actual
+let anticipos = [];     // [{monto, fecha}]
+let selectedTipo = 'Pantalla';
+
+const estadoColors = { 'Pendiente':'#f59e0b','En proceso':'#3b82f6','Esperando refacción':'#8b5cf6','Listo':'#10b981','Entregado':'#6b7280' };
+
+// ══ MENU ══
+function openMenu() { document.getElementById('drawer').classList.add('open'); document.getElementById('overlay').style.display='block'; }
+function closeMenu() { document.getElementById('drawer').classList.remove('open'); document.getElementById('overlay').style.display='none'; }
+
+// ══ NAVIGATE ══
+function navigate(tab) {
+  closeMenu();
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-'+tab).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('nav-'+tab).classList.add('active');
+  const titles = { pos:'🛒 Punto de Venta', inventario:'📦 Inventario', reparaciones:'🔧 Reparaciones', listos:'✅ Listos', ventas:'📈 Reporte de Ventas' };
+  document.getElementById('page-title').textContent = titles[tab]||tab;
+  if (tab==='ventas') renderVentas();
+  else renderAll();
+}
+
+// ══ POS TABS ══
+function switchPosTab(tab) {
+  document.querySelectorAll('.pos-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.pos-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-'+tab).classList.add('active');
+  document.getElementById('panel-'+tab).classList.add('active');
+  if (tab==='accesorios') setTimeout(()=>document.getElementById('barcode-input').focus(), 100);
+  if (tab==='saldos') renderSaldos();
+}
+
+// ══ BARCODE / SEARCH ══
+function focusBarcode() { document.getElementById('barcode-input').focus(); }
+function onBarcodeInput() {
+  const val = document.getElementById('barcode-input').value.trim().toLowerCase();
+  const res = document.getElementById('barcode-result');
+  if (!val) { res.style.display='none'; renderProducts(''); return; }
+  renderProducts(val);
+  const exact = products.find(p => p.codigo === val);
+  if (exact) {
+    res.style.display = 'block';
+    res.innerHTML = `<div style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:8px;padding:10px;display:flex;align-items:center;justify-content:space-between">
+      <div><span style="color:#10b981;font-weight:700">✅ ${exact.nombre}</span> <span style="color:#64748b;font-size:12px">— $${exact.precio} | Stock: ${exact.stock}</span></div>
+      <button class="btn btn-success btn-sm" onclick="addToCart(${exact.id});document.getElementById('barcode-input').value='';document.getElementById('barcode-result').style.display='none'">+ Agregar</button>
+    </div>`;
+  } else { res.style.display='none'; }
+}
+function onBarcodeKey(e) {
+  if (e.key === 'Enter') {
+    const val = document.getElementById('barcode-input').value.trim();
+    const exact = products.find(p => p.codigo === val);
+    if (exact && exact.stock > 0) {
+      addToCart(exact.id);
+      document.getElementById('barcode-input').value = '';
+      document.getElementById('barcode-result').style.display = 'none';
+      showToast(`✅ ${exact.nombre} agregado`);
+    }
+  }
+}
+
+// ══ PRODUCTS ══
+function renderProducts(search='') {
+  const q = search || document.getElementById('barcode-input').value.toLowerCase();
+  const filtered = q ? products.filter(p => p.nombre.toLowerCase().includes(q) || p.codigo.includes(q)) : products;
+  document.getElementById('product-grid').innerHTML = filtered.map(p => {
+    const inCart = cart.find(c => c.id===p.id);
+    return `<div class="product-card${p.stock===0?' disabled':''}${inCart?' in-cart':''}" onclick="${p.stock>0?`addToCart(${p.id})`:''}">
+      <div style="font-size:22px;margin-bottom:6px">📦</div>
+      <div style="font-weight:700;font-size:12px;margin-bottom:2px">${p.nombre}</div>
+      <div style="font-size:11px;color:#4b5563;margin-bottom:8px">${p.categoria} · #${p.codigo}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:800;color:#f97316;font-size:14px">$${p.precio}</span>
+        <span style="font-size:11px;color:${p.stock<=5?'#ef4444':'#10b981'};font-weight:600">${p.stock} uds</span>
+      </div>
+    </div>`;
+  }).join('') || '<div class="empty">No se encontraron productos</div>';
+}
+
+// ══ CART ══
+function addToCart(id) {
+  const p = products.find(x=>x.id===id);
+  const e = cart.find(c=>c.id===id);
+  if (e) e.qty++; else cart.push({...p, qty:1});
+  renderTicket();
+  renderProducts();
+}
+function removeFromCart(id) { cart=cart.filter(c=>c.id!==id); renderTicket(); renderProducts(); }
+function changeQty(id,d) { const c=cart.find(x=>x.id===id); if(c) c.qty=Math.max(1,c.qty+d); renderTicket(); }
+
+// ══ REPAIR TIPO ══
+function selectTipo(btn, tipo) {
+  document.querySelectorAll('.tipo-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  selectedTipo = tipo;
+}
+
+// ══ ADD REPAIR TO TICKET ══
+function addRepairToTicket() {
+  const cliente = document.getElementById('rep-cliente').value.trim();
+  const modelo = document.getElementById('rep-modelo').value.trim();
+  if (!cliente || !modelo) { alert('Cliente y modelo son requeridos'); return; }
+  const custom = document.getElementById('rep-tipo-custom').value.trim();
+  const tipoFinal = custom || selectedTipo;
+  const costo = Number(document.getElementById('rep-costo').value) || 0;
+  const anticipo = Number(document.getElementById('rep-anticipo-inicial').value) || 0;
+  const rep = {
+    tempId: Date.now(),
+    cliente, modelo,
+    telefono: document.getElementById('rep-telefono').value,
+    serie: document.getElementById('rep-serie').value,
+    tipo: tipoFinal,
+    problema: document.getElementById('rep-problema').value,
+    costo, anticipo,
+    fecha: document.getElementById('rep-fecha').value,
+    notas: document.getElementById('rep-notas').value,
+  };
+  repairTicket.push(rep);
+  if (anticipo > 0) anticipos.push({ monto: anticipo, fecha: new Date().toISOString().slice(0,10), label: `Anticipo ${cliente}` });
+  // Clear form
+  ['rep-cliente','rep-telefono','rep-modelo','rep-serie','rep-tipo-custom','rep-problema','rep-costo','rep-anticipo-inicial','rep-notas'].forEach(i=>document.getElementById(i).value='');
+  document.getElementById('rep-fecha').value = '';
+  renderTicket();
+  switchPosTab('accesorios');
+  showToast(`🔧 ${cliente} — ${modelo} agregado`);
+}
+
+// ══ TICKET RENDER ══
+function renderTicket() {
+  const hasCart = cart.length > 0;
+  const hasRep = repairTicket.length > 0;
+  const hasAny = hasCart || hasRep;
+
+  document.getElementById('ticket-empty').style.display = hasAny ? 'none' : 'block';
+  document.getElementById('ticket-totals').style.display = hasAny ? 'block' : 'none';
+  document.getElementById('btn-clear').style.display = hasAny ? 'inline-block' : 'none';
+
+  // Date
+  document.getElementById('ticket-date').textContent = new Date().toLocaleDateString('es-MX',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+
+  // Accesorios
+  const accSec = document.getElementById('ticket-accesorios-section');
+  accSec.style.display = hasCart ? 'block' : 'none';
+  document.getElementById('ticket-items').innerHTML = cart.map(item=>`
+    <div class="ticket-item">
+      <div class="ticket-item-top">
+        <span style="font-size:13px;font-weight:600">${item.nombre}</span>
+        <button class="btn btn-danger btn-sm" onclick="removeFromCart(${item.id})">✕</button>
+      </div>
+      <div class="ticket-item-bot">
+        <div class="qty-row">
+          <button class="qty-btn" onclick="changeQty(${item.id},-1)">−</button>
+          <span style="font-weight:700;min-width:22px;text-align:center">${item.qty}</span>
+          <button class="qty-btn" onclick="changeQty(${item.id},1)">+</button>
+        </div>
+        <span style="font-weight:800;color:#f97316">$${(item.precio*item.qty).toLocaleString()}</span>
+      </div>
+    </div>`).join('');
+
+  // Reparaciones
+  const repSec = document.getElementById('ticket-repairs-section');
+  repSec.style.display = hasRep ? 'block' : 'none';
+  document.getElementById('ticket-repairs').innerHTML = repairTicket.map(r=>`
+    <div class="rep-ticket">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <div style="font-weight:700;font-size:13px">${r.cliente}</div>
+          <div style="font-size:11px;color:#64748b">${r.modelo} · ${r.tipo}</div>
+        </div>
+        <button class="btn btn-danger btn-sm" onclick="removeRepair(${r.tempId})">✕</button>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:12px">
+        <span style="color:#64748b">${r.problema||'—'}</span>
+        <span style="font-weight:800;color:#f97316">$${r.costo.toLocaleString()}</span>
+      </div>
+      ${r.anticipo>0?`<div style="font-size:11px;color:#3b82f6;margin-top:4px">Anticipo inicial: $${r.anticipo.toLocaleString()}</div>`:''}
+    </div>`).join('');
+
+  updateTotals();
+}
+
+function removeRepair(tempId) { repairTicket=repairTicket.filter(r=>r.tempId!==tempId); renderTicket(); }
+
+function updateTotals() {
+  const totalAcc = cart.reduce((s,c)=>s+c.precio*c.qty,0);
+  const totalRep = repairTicket.reduce((s,r)=>s+r.costo,0);
+  const total = totalAcc + totalRep;
+
+  document.getElementById('line-accesorios').style.display = totalAcc>0?'flex':'none';
+  document.getElementById('line-reparaciones').style.display = totalRep>0?'flex':'none';
+  document.getElementById('total-accesorios').textContent = '$'+totalAcc.toLocaleString();
+  document.getElementById('total-reparaciones').textContent = '$'+totalRep.toLocaleString();
+  document.getElementById('total-general').textContent = '$'+total.toLocaleString();
+
+  const antipoInput = Number(document.getElementById('anticipo-input').value)||0;
+  const totalAnticipo = anticipos.reduce((s,a)=>s+a.monto,0) + antipoInput;
+  const pendiente = Math.max(0, total - totalAnticipo);
+
+  document.getElementById('total-anticipos').textContent = '$'+totalAnticipo.toLocaleString();
+  document.getElementById('total-pendiente').textContent = '$'+pendiente.toLocaleString();
+
+  // Mostrar anticipos aplicados
+  document.getElementById('anticipo-aplicados').innerHTML = anticipos.map(a=>`
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:2px">
+      <span>${a.label||'Anticipo'}</span><span style="color:#3b82f6">−$${a.monto.toLocaleString()}</span>
+    </div>`).join('');
+}
+
+function applyAnticipo() {
+  const monto = Number(document.getElementById('anticipo-input').value)||0;
+  if (monto<=0) return;
+  anticipos.push({ monto, fecha: new Date().toISOString().slice(0,10), label:'Anticipo en caja' });
+  document.getElementById('anticipo-input').value = '';
+  updateTotals();
+  showToast(`💵 Anticipo de $${monto.toLocaleString()} aplicado`);
+}
+
+// ══ FINALIZE ══
+function finalizeSale() {
+  const now = new Date();
+  const fecha = now.toISOString().slice(0,10);
+  const hora  = now.toTimeString().slice(0,5);
+  if (cart.length > 0) {
+    cart.forEach(item=>{ const p=products.find(x=>x.id===item.id); if(p){ p.stock-=item.qty; syncSave('products', p.id, p); } });
+    const totalAcc = cart.reduce((s,c)=>s+c.precio*c.qty, 0);
+    const sale = { id:salesHistory.length+1, fecha, hora, cliente:'Mostrador', telefono:'', descripcion:cart.map(c=>`${c.nombre} ×${c.qty}`).join(', '), tipo:'Accesorio', total:totalAcc, cobrado:totalAcc, pendiente:0, estado:'Pagado' };
+    salesHistory.push(sale);
+    syncSave('salesHistory', sale.id, sale);
+  }
+  repairTicket.forEach(r=>{
+    const rid = Math.max(...repairs.map(x=>x.id), 0)+1;
+    const ant = r.anticipo>0?[{monto:r.anticipo,fecha,metodo:'Efectivo'}]:[];
+    const rep = { id:rid, cliente:r.cliente, telefono:r.telefono, modelo:r.modelo, tipo:r.tipo, problema:r.problema, estado:'Pendiente', fechaEntrada:fecha, fechaEstimada:r.fecha, costo:r.costo, anticipos:ant, notas:r.notas };
+    repairs.push(rep);
+    syncSave('repairs', rid, rep);
+    const cobrado=r.anticipo||0;
+    const sale = { id:salesHistory.length+1, fecha, hora, cliente:r.cliente, telefono:r.telefono, descripcion:`${r.modelo} — ${r.tipo}`, tipo:'Reparación', total:r.costo, cobrado, pendiente:Math.max(0,r.costo-cobrado), estado:cobrado>=r.costo?'Pagado':'Anticipo', repairId:rid };
+    salesHistory.push(sale);
+    syncSave('salesHistory', sale.id, sale);
+  });
+  cart=[]; repairTicket=[]; anticipos=[];
+  renderTicket(); renderProducts(); renderInventory(); renderRepairs(); renderListos(); renderSaldos(); updateBadges();
+  showToast('✅ Ticket registrado con éxito');
+}
+
+function clearAll() { cart=[]; repairTicket=[]; anticipos=[]; document.getElementById('anticipo-input').value=''; renderTicket(); renderProducts(); }
+
+// ══ INVENTORY ══
+let invPage = 1;
+const INV_PAGE_SIZE = 50;
+
+function renderInventory() {
+  const q = (document.getElementById('search-inv')||{value:''}).value.toLowerCase();
+  const filtered = q ? products.filter(p => p.nombre.toLowerCase().includes(q) || String(p.codigo).includes(q) || (p.categoria||'').toLowerCase().includes(q)) : products;
+
+  // Stats
+  const statsEl = document.getElementById('inv-stats');
+  if (statsEl) {
+    const cats = [...new Set(products.map(p=>p.categoria||'Sin categoría'))].length;
+    const sinStock = products.filter(p=>p.stock===0).length;
+    const bajo = products.filter(p=>p.stock>0&&p.stock<=5).length;
+    statsEl.innerHTML = [
+      ['📦','Total',products.length,'#3b82f6'],
+      ['🏷️','Categorías',cats,'#8b5cf6'],
+      ['⚠️','Stock bajo',bajo,'#f59e0b'],
+      ['❌','Sin stock',sinStock,'#ef4444'],
+    ].map(([ic,lb,vl,cl])=>`<div style="background:#111827;border:1px solid #1e2d3d;border-radius:12px;padding:12px;text-align:center">
+      <div style="font-size:18px">${ic}</div>
+      <div style="font-weight:800;font-size:22px;color:${cl}">${vl}</div>
+      <div style="font-size:11px;color:#4b5563;margin-top:2px">${lb}</div>
+    </div>`).join('');
+  }
+
+  const total = filtered.length;
+  const pages = Math.max(1, Math.ceil(total/INV_PAGE_SIZE));
+  if (invPage > pages) invPage = pages;
+  const start = (invPage-1)*INV_PAGE_SIZE;
+  const page = filtered.slice(start, start+INV_PAGE_SIZE);
+
+  document.getElementById('inventory-table').innerHTML = page.map(p=>{
+    const e = p.stock===0?['#ef4444','Sin stock']:p.stock<=5?['#f59e0b','Bajo']:['#10b981','OK'];
+    return `<tr>
+      <td style="color:#4b5563;font-size:12px">${p.codigo}</td>
+      <td style="font-weight:600;max-width:260px">${p.nombre}</td>
+      <td style="color:#64748b;font-size:12px">${p.categoria||'—'}</td>
+      <td style="color:#64748b;font-size:12px">$${(p.precioCosto||0).toLocaleString()}</td>
+      <td style="font-weight:800;color:#f97316">$${p.precio.toLocaleString()}</td>
+      <td style="font-weight:700">${p.stock}</td>
+      <td><span class="badge" style="background:${e[0]}22;color:${e[0]};border:1px solid ${e[0]}44">${e[1]}</span></td>
+      <td><div style="display:flex;gap:5px">
+        <button class="btn btn-danger btn-sm" onclick="updateStock(${p.id},-1)">−</button>
+        <button class="btn btn-success btn-sm" onclick="updateStock(${p.id},1)">+</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteProduct(${p.id})">🗑</button>
+      </div></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8" class="empty">No se encontraron productos</td></tr>';
+
+  const pgEl = document.getElementById('inv-pagination');
+  if (pgEl) pgEl.innerHTML = `<span>Mostrando ${total===0?0:start+1}–${Math.min(start+INV_PAGE_SIZE,total)} de ${total} productos</span>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-sm" onclick="invPage=Math.max(1,invPage-1);renderInventory()" ${invPage<=1?'disabled':''}>← Ant</button>
+      <span style="padding:4px 10px;background:#1e2433;border-radius:6px;font-size:12px">${invPage} / ${pages}</span>
+      <button class="btn btn-sm" onclick="invPage=Math.min(${pages},invPage+1);renderInventory()" ${invPage>=pages?'disabled':''}>Sig →</button>
+    </div>`;
+}
+
+function updateStock(id,d){ const p=products.find(x=>x.id===id); if(p){ p.stock=Math.max(0,p.stock+d); syncSave('products',id,p); } renderInventory(); updateBadges(); }
+function deleteProduct(id){ if(!confirm('¿Eliminar este producto?')) return; products=products.filter(p=>p.id!==id); syncDelete('products',id); renderInventory(); renderProducts(); updateBadges(); }
+
+// ══ EXCEL / CSV IMPORT ══
+function importExcel(input) {
+  const file = input.files[0]; if (!file) return;
+  input.value='';
+  const status = document.getElementById('import-status');
+  status.style.display='block';
+  status.innerHTML=`<div style="background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.3);border-radius:10px;padding:12px;color:#3b82f6">⏳ Procesando <strong>${file.name}</strong>...</div>`;
+
+  const processCSV = (text) => {
+    try {
+      const rows = parseCSVText(text);
+      if (rows.length < 2) throw new Error('Archivo sin datos');
+      const headers = rows[0].map(h=>h.toLowerCase().trim());
+      const cm = {
+        codigo:   findCol(headers,['codigo','código','clave','sku','id']),
+        nombre:   findCol(headers,['descripcion','descripción','nombre','producto','articulo','artículo']),
+        costo:    findCol(headers,['precio costo','costo','p. costo','precio_costo']),
+        venta:    findCol(headers,['precio venta','venta','p. venta','precio_venta']),
+        categoria:findCol(headers,['departamento','categoria','categoría','tipo','category']),
+        stock:    findCol(headers,['existencia','existencias','stock','cantidad','qty']),
+      };
+      let imp=0,upd=0,skip=0;
+      let nextId = Math.max(...products.map(p=>p.id),0)+1;
+      for (let i=1;i<rows.length;i++) {
+        const row=rows[i]; if(!row.length||row.every(c=>!c)) continue;
+        const nombre=(cm.nombre>=0?row[cm.nombre]:'').trim(); if(!nombre){skip++;continue;}
+        const codigo=String(cm.codigo>=0&&row[cm.codigo]?row[cm.codigo]:nextId).trim();
+        const precio=parseFloat(cm.venta>=0?row[cm.venta]:0)||0;
+        const precioCosto=parseFloat(cm.costo>=0?row[cm.costo]:0)||0;
+        const categoria=(cm.categoria>=0?row[cm.categoria]:'General').trim()||'General';
+        const stock=parseInt(cm.stock>=0?row[cm.stock]:0)||0;
+        const ex=products.find(p=>String(p.codigo)===codigo||p.nombre.toLowerCase()===nombre.toLowerCase());
+        if(ex){ex.nombre=nombre;ex.precio=precio;ex.precioCosto=precioCosto;ex.categoria=categoria;ex.stock=stock;upd++;}
+        else{products.push({id:nextId++,codigo,nombre,categoria,precio,precioCosto,stock});imp++;}
+      }
+      status.innerHTML=`<div style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:10px;padding:14px">
+        <div style="font-weight:700;color:#10b981;margin-bottom:8px">✅ Importación completada — ${file.name}</div>
+        <div style="display:flex;gap:20px;font-size:13px;flex-wrap:wrap">
+          <span>🆕 <strong style="color:#10b981">${imp}</strong> nuevos</span>
+          <span>🔄 <strong style="color:#3b82f6">${upd}</strong> actualizados</span>
+          <span>⏭ <strong style="color:#64748b">${skip}</strong> omitidos</span>
+          <span>📦 <strong style="color:#f97316">${products.length}</strong> total en inventario</span>
+        </div>
+      </div>`;
+      invPage=1; renderInventory(); renderProducts(); updateBadges();
+      products.forEach(p => syncSave('products', p.id, p));
+      setTimeout(()=>status.style.display='none', 8000);
+    } catch(err) {
+      status.innerHTML=`<div style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:10px;padding:12px;color:#ef4444">❌ Error: ${err.message}</div>`;
+    }
+  };
+
+  if (file.name.endsWith('.csv')) {
+    const r=new FileReader(); r.onload=e=>processCSV(e.target.result); r.readAsText(file,'UTF-8');
+  } else {
+    loadSheetJS(()=>{
+      const r=new FileReader();
+      r.onload=e=>{
+        try{
+          const wb=XLSX.read(e.target.result,{type:'binary'});
+          const ws=wb.Sheets[wb.SheetNames[0]];
+          processCSV(XLSX.utils.sheet_to_csv(ws));
+        }catch(err){
+          status.innerHTML=`<div style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:10px;padding:12px;color:#ef4444">❌ No se pudo leer el XLS. Conviértelo a CSV e intenta de nuevo.</div>`;
+        }
+      };
+      r.readAsBinaryString(file);
+    });
+  }
+}
+
+function loadSheetJS(cb){
+  if(typeof XLSX!=='undefined'){cb();return;}
+  const s=document.createElement('script');
+  s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  s.onload=cb; s.onerror=()=>{cb();}; document.head.appendChild(s);
+}
+function findCol(headers,names){for(const n of names){const i=headers.findIndex(h=>h.includes(n));if(i>=0)return i;}return -1;}
+function parseCSVText(text){
+  return text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n').map(line=>{
+    const cols=[];let cur='',inQ=false;
+    for(let i=0;i<line.length;i++){const c=line[i];if(c==='"'){inQ=!inQ;}else if(c===','&&!inQ){cols.push(cur.trim());cur='';}else cur+=c;}
+    cols.push(cur.trim());return cols;
+  });
+}
+function exportTemplate(){
+  const csv='Codigo,Descripcion,Precio Costo,Precio Venta,Departamento,Existencia\n1001,PANTALLA IPHONE 15,750,1800,Pantallas,5\n1002,BATERIA SAMSUNG A52,250,800,Baterias,10\n';
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download='plantilla_inventario.csv';a.click();
+}
+
+// ══ REPAIRS ══
+function renderRepairs() {
+  const q = document.getElementById('search-repair').value.toLowerCase();
+  const filtered = repairs.filter(r=>r.estado!=='Entregado'&&(r.cliente.toLowerCase().includes(q)||r.modelo.toLowerCase().includes(q)));
+  const tbody = document.getElementById('repairs-table');
+  if(!filtered.length){tbody.innerHTML='<tr><td colspan="7" class="empty">No hay reparaciones activas</td></tr>';return;}
+  tbody.innerHTML = filtered.map(r=>{
+    const c=estadoColors[r.estado]||'#6b7280';
+    const totalAnticipo = r.anticipos.reduce((s,a)=>s+a.monto,0);
+    const pendiente = Math.max(0,r.costo-totalAnticipo);
+    return `<tr>
+      <td style="color:#4b5563;font-weight:700">#${r.id}</td>
+      <td><div style="font-weight:700">${r.cliente}</div><div style="font-size:11px;color:#4b5563">${r.telefono}</div></td>
+      <td><div style="font-weight:600">${r.modelo}</div></td>
+      <td><div style="font-size:12px">${r.tipo}</div><div style="font-size:11px;color:#4b5563">${r.problema}</div></td>
+      <td>
+        <span class="badge" style="background:${c}22;color:${c};border:1px solid ${c}44">${r.estado}</span>
+        <select onchange="changeEstado(${r.id},this.value)" style="margin-top:4px;font-size:11px;padding:3px 6px;width:auto">
+          ${['Pendiente','En proceso','Esperando refacción','Listo'].map(s=>`<option${s===r.estado?' selected':''}>${s}</option>`).join('')}
+        </select>
+      </td>
+      <td>
+        <div style="font-weight:800;color:#f97316">$${r.costo.toLocaleString()}</div>
+        <div style="font-size:11px;color:#3b82f6">Anticipo: $${totalAnticipo.toLocaleString()}</div>
+        <div style="font-size:11px;color:${pendiente>0?'#f59e0b':'#10b981'};font-weight:700">Pendiente: $${pendiente.toLocaleString()}</div>
+      </td>
+      <td><button class="btn btn-blue btn-sm" onclick="addAnticipoRepair(${r.id})">+ Abono</button></td>
+    </tr>`;
+  }).join('');
+}
+function changeEstado(id,estado){ const r=repairs.find(x=>x.id===id); if(r){r.estado=estado; syncSave('repairs',id,r);} renderRepairs(); renderListos(); updateBadges(); }
+function addAnticipoRepair(id){
+  const monto = Number(prompt('Monto del abono:'));
+  if(!monto||monto<=0) return;
+  const r=repairs.find(x=>x.id===id);
+  if(r){ r.anticipos.push({monto,fecha:new Date().toISOString().slice(0,10)}); renderRepairs(); showToast(`💵 Abono de $${monto.toLocaleString()} registrado`); }
+}
+
+// ══ LISTOS ══
+function renderListos() {
+  const listos = repairs.filter(r=>r.estado==='Listo');
+  const grid = document.getElementById('listos-grid');
+  if(!listos.length){grid.innerHTML='<div style="text-align:center;color:#4b5563;padding:80px"><div style="font-size:48px">✅</div><div style="margin-top:12px">No hay equipos listos</div></div>';return;}
+  grid.innerHTML = listos.map(r=>{
+    const totalAnticipo=r.anticipos.reduce((s,a)=>s+a.monto,0);
+    const pendiente=Math.max(0,r.costo-totalAnticipo);
+    return `<div class="listo-card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div><div style="font-weight:800;font-size:15px">${r.cliente}</div><div style="font-size:12px;color:#4b5563">${r.telefono}</div></div>
+        <span class="badge" style="background:#10b98122;color:#10b981;border:1px solid #10b98144">✅ Listo</span>
+      </div>
+      <div style="background:#0d1117;border-radius:8px;padding:12px;margin:12px 0">
+        <div style="font-weight:700">${r.modelo}</div>
+        <div style="font-size:12px;color:#64748b">${r.tipo} — ${r.problema}</div>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:12px">
+        <div>
+          <div style="font-size:11px;color:#4b5563">Por cobrar</div>
+          <div style="font-weight:800;font-size:22px;color:#f97316">$${pendiente.toLocaleString()}</div>
+          <div style="font-size:11px;color:#4b5563">Costo total: $${r.costo.toLocaleString()}</div>
+          <div style="font-size:11px;color:#3b82f6">Anticipos: $${totalAnticipo.toLocaleString()}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;color:#4b5563">Entrega est.</div>
+          <div style="font-weight:700">${r.fechaEstimada||'—'}</div>
+        </div>
+      </div>
+      <button class="btn btn-success" style="width:100%;padding:10px;font-size:13px" onclick="intentarEntregado(${r.id})">📦 Marcar como entregado</button>
+    </div>`;
+  }).join('');
+}
+function intentarEntregado(id) {
+  const r = repairs.find(x => x.id === id);
+  if (!r) return;
+  const pagado = r.anticipos.reduce((s,a) => s+a.monto, 0);
+  if (pagado < r.costo) {
+    const pendiente = r.costo - pagado;
+    alert(`⚠️ No se puede entregar. Aún quedan $${pendiente.toLocaleString()} pendientes por cobrar.\n\nRegistra el pago completo antes de marcar como entregado.`);
+    return;
+  }
+  r.estado = 'Entregado';
+  syncSave('repairs', id, r);
+  renderListos(); renderRepairs(); renderSaldos(); updateBadges();
+}
+function marcarEntregado(id){ const r=repairs.find(x=>x.id===id); if(r){ r.estado='Entregado'; syncSave('repairs',id,r); } renderListos(); renderRepairs(); renderSaldos(); updateBadges(); }
+
+// ══ BADGES ══
+function updateBadges() {
+  const lc=repairs.filter(r=>r.estado==='Listo').length;
+  const ac=repairs.filter(r=>r.estado!=='Entregado').length;
+  const bc=products.filter(p=>p.stock<=5).length;
+  const bl=document.getElementById('badge-listos'); bl.textContent=lc; bl.style.display=lc>0?'inline':'none';
+  const br=document.getElementById('badge-rep'); br.textContent=ac; br.style.display=ac>0?'inline':'none';
+  const bs=document.getElementById('badge-stock'); bs.textContent=bc; bs.style.display=bc>0?'inline':'none';
+  document.getElementById('stat-activas').textContent=ac;
+  document.getElementById('stat-listos').textContent=lc;
+  document.getElementById('stat-stock').textContent=bc;
+}
+
+// ══ PRODUCT MODAL ══
+function openProductModal(){ ['p-codigo','p-nombre','p-categoria','p-precio','p-stock'].forEach(i=>document.getElementById(i).value=''); document.getElementById('product-modal').classList.add('open'); }
+function closeProductModal(){ document.getElementById('product-modal').classList.remove('open'); }
+function saveProduct(){
+  const nombre=document.getElementById('p-nombre').value.trim(); if(!nombre) return;
+  const p = { id:Math.max(...products.map(p=>p.id),0)+1, codigo:document.getElementById('p-codigo').value||'—', nombre, categoria:document.getElementById('p-categoria').value, precio:Number(document.getElementById('p-precio').value)||0, stock:Number(document.getElementById('p-stock').value)||0 };
+  products.push(p);
+  syncSave('products', p.id, p);
+  closeProductModal(); renderInventory(); renderProducts(); updateBadges();
+}
+
+// ══ TOAST ══
+function showToast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none',3000); }
+
+// ══ SALDOS PENDIENTES ══
+let saldosFilter = 'todos';
+let abonoTargetId = null;
+let abonoTargetType = null;
+let selectedPago = 'Efectivo';
+let ventasConSaldo = [];
+
+function filterSaldos(filter, btn) {
+  saldosFilter = filter;
+  document.querySelectorAll('.saldo-filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderSaldos();
+}
+
+function getPendingItems() {
+  const today = new Date();
+  const items = [];
+  repairs.filter(r => r.estado !== 'Entregado').forEach(r => {
+    const pagado = r.anticipos.reduce((s,a) => s+a.monto, 0);
+    const pendiente = Math.max(0, r.costo - pagado);
+    if (pendiente > 0) {
+      const dias = Math.floor((today - new Date(r.fechaEntrada)) / 86400000);
+      items.push({ id:r.id, tipo:'reparacion', cliente:r.cliente, telefono:r.telefono, descripcion:`${r.modelo} — ${r.tipo}`, total:r.costo, pagado, pendiente, diasPendiente:dias, estado:r.estado });
+    }
+  });
+  ventasConSaldo.forEach(v => {
+    const pagado = v.anticipos.reduce((s,a) => s+a.monto, 0);
+    const pendiente = Math.max(0, v.total - pagado);
+    if (pendiente > 0) {
+      const dias = Math.floor((today - new Date(v.fecha)) / 86400000);
+      items.push({ id:v.id, tipo:'venta', cliente:v.cliente, telefono:v.telefono||'—', descripcion:v.descripcion, total:v.total, pagado, pendiente, diasPendiente:dias, estado:null });
+    }
+  });
+  return items.sort((a,b) => b.pendiente - a.pendiente);
+}
+
+function renderSaldos() {
+  const all = getPendingItems();
+  const totalPend = all.reduce((s,x) => s+x.pendiente, 0);
+  const urgentes = all.filter(x => x.diasPendiente >= 7).length;
+
+  document.getElementById('saldo-stats').innerHTML = `
+    <div class="saldo-stat-card"><div style="font-size:28px;font-weight:800;color:#f59e0b">${all.length}</div><div style="font-size:11px;color:#64748b;margin-top:4px">CON SALDO PENDIENTE</div></div>
+    <div class="saldo-stat-card"><div style="font-size:20px;font-weight:800;color:#f97316">$${totalPend.toLocaleString()}</div><div style="font-size:11px;color:#64748b;margin-top:4px">TOTAL POR COBRAR</div></div>
+    <div class="saldo-stat-card"><div style="font-size:28px;font-weight:800;color:#ef4444">${urgentes}</div><div style="font-size:11px;color:#64748b;margin-top:4px">URGENTES (+7 DÍAS)</div></div>`;
+
+  let items = all;
+  if (saldosFilter==='reparacion') items = items.filter(x => x.tipo==='reparacion');
+  if (saldosFilter==='venta') items = items.filter(x => x.tipo==='venta');
+  if (saldosFilter==='urgente') items = items.filter(x => x.diasPendiente>=7);
+
+  const badge = document.getElementById('badge-saldos-tab');
+  badge.textContent = all.length; badge.style.display = all.length>0?'inline':'none';
+
+  const list = document.getElementById('saldos-list');
+  if (!items.length) { list.innerHTML='<div style="text-align:center;color:#4b5563;padding:60px 0"><div style="font-size:40px">✅</div><div style="margin-top:10px">No hay saldos pendientes en este filtro</div></div>'; return; }
+
+  list.innerHTML = items.map(item => {
+    const pct = Math.min(100, Math.round((item.pagado/item.total)*100));
+    const barColor = pct>=75?'#10b981':pct>=40?'#3b82f6':'#f59e0b';
+    const urgColor = item.diasPendiente>=7?'#ef4444':item.diasPendiente>=3?'#f59e0b':'#64748b';
+    return `<div class="saldo-card">
+      <div class="saldo-header">
+        <div class="saldo-info">
+          <div class="saldo-avatar">${item.cliente.charAt(0).toUpperCase()}</div>
+          <div>
+            <div style="font-weight:800;font-size:14px">${item.cliente}</div>
+            <div style="font-size:12px;color:#64748b">${item.telefono} · <span style="color:${item.tipo==='reparacion'?'#3b82f6':'#f97316'}">${item.tipo==='reparacion'?'🔧 Reparación':'🛒 Venta'}</span></div>
+          </div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:800;font-size:18px;color:#f97316">$${item.pendiente.toLocaleString()}</div>
+          <div style="font-size:11px;color:#64748b">pendiente</div>
+        </div>
+      </div>
+      <div style="font-size:12px;color:#9ca3af;margin-bottom:8px">
+        📦 ${item.descripcion} ${item.estado?`· <span style="color:${estadoColors[item.estado]||'#6b7280'}">${item.estado}</span>`:''}
+      </div>
+      <div class="saldo-bar-bg"><div class="saldo-bar-fill" style="width:${pct}%;background:${barColor}"></div></div>
+      <div class="saldo-amounts">
+        <span style="color:#3b82f6">Pagado: $${item.pagado.toLocaleString()} (${pct}%)</span>
+        <span style="color:${urgColor}">⏱ ${item.diasPendiente===0?'Hoy':`Hace ${item.diasPendiente} día${item.diasPendiente!==1?'s':''}`}</span>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn btn-success" style="flex:1;padding:9px;font-size:13px" onclick="openAbonoModal(${item.id},'${item.tipo}')">💵 Registrar abono</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ══ ABONO MODAL ══
+function openAbonoModal(id, tipo) {
+  abonoTargetId=id; abonoTargetType=tipo; selectedPago='Efectivo';
+  ['pago-efectivo','pago-tarjeta','pago-transfer'].forEach(i=>document.getElementById(i).classList.remove('active'));
+  document.getElementById('pago-efectivo').classList.add('active');
+  document.getElementById('abono-monto').value='';
+  document.getElementById('abono-nota').value='';
+  document.getElementById('abono-preview').style.display='none';
+
+  let item = tipo==='reparacion' ? repairs.find(r=>r.id===id) : ventasConSaldo.find(v=>v.id===id);
+  if (!item) return;
+  const pagado = item.anticipos.reduce((s,a)=>s+a.monto,0);
+  const total = item.costo||item.total;
+  const pendiente = Math.max(0, total-pagado);
+
+  document.getElementById('abono-cliente-info').textContent = `${item.cliente} · ${item.modelo||item.descripcion||''}`;
+  document.getElementById('abono-total').textContent = '$'+total.toLocaleString();
+  document.getElementById('abono-pagado').textContent = '$'+pagado.toLocaleString();
+  document.getElementById('abono-pendiente').textContent = '$'+pendiente.toLocaleString();
+
+  const hist = document.getElementById('abono-historial');
+  hist.innerHTML = item.anticipos.length===0
+    ? '<div style="color:#4b5563;font-size:12px;padding:8px 0">Sin abonos previos</div>'
+    : item.anticipos.map(a=>`<div class="historial-item"><span>💵 $${a.monto.toLocaleString()}</span><span style="color:#64748b">${a.fecha}</span><span style="color:#10b981;font-weight:600">${a.metodo||'Efectivo'}</span></div>`).join('');
+
+  document.getElementById('abono-modal').classList.add('open');
+}
+function closeAbonoModal(){ document.getElementById('abono-modal').classList.remove('open'); }
+
+function previewAbono() {
+  const monto = Number(document.getElementById('abono-monto').value)||0;
+  const preview = document.getElementById('abono-preview');
+  if (!monto) { preview.style.display='none'; return; }
+  let item = abonoTargetType==='reparacion' ? repairs.find(r=>r.id===abonoTargetId) : ventasConSaldo.find(v=>v.id===abonoTargetId);
+  if (!item) return;
+  const pagado = item.anticipos.reduce((s,a)=>s+a.monto,0);
+  const total = item.costo||item.total;
+  const nuevoPend = Math.max(0, total-pagado-monto);
+  preview.style.display='block';
+  preview.innerHTML = `Nuevo pendiente: <strong style="color:${nuevoPend===0?'#10b981':'#f59e0b'}">$${nuevoPend.toLocaleString()}</strong> ${nuevoPend===0?'<span style="color:#10b981">✅ ¡Saldado!</span>':''}`;
+}
+
+function selectPago(btn, metodo) {
+  ['pago-efectivo','pago-tarjeta','pago-transfer'].forEach(i=>document.getElementById(i).classList.remove('active'));
+  btn.classList.add('active'); selectedPago=metodo;
+}
+
+function saveAbono() {
+  const monto = Number(document.getElementById('abono-monto').value)||0;
+  if (monto<=0) { alert('Ingresa un monto válido'); return; }
+  let item = abonoTargetType==='reparacion' ? repairs.find(r=>r.id===abonoTargetId) : ventasConSaldo.find(v=>v.id===abonoTargetId);
+  if (!item) return;
+  item.anticipos.push({ monto, fecha:new Date().toISOString().slice(0,10), metodo:selectedPago, nota:document.getElementById('abono-nota').value });
+  syncSave('repairs', abonoTargetId, item);
+
+  const total = item.costo || item.total;
+  const totalPagado = item.anticipos.reduce((s,a)=>s+a.monto, 0);
+  const nuevoPendiente = Math.max(0, total - totalPagado);
+  const sale = salesHistory.find(s => s.repairId === abonoTargetId || (s.cliente === item.cliente && s.total === total));
+  if (sale) {
+    sale.cobrado   = Math.min(total, totalPagado);
+    sale.pendiente = nuevoPendiente;
+    sale.estado    = nuevoPendiente === 0 ? 'Pagado' : 'Anticipo';
+    syncSave('salesHistory', sale.id, sale);
+  }
+
+  closeAbonoModal();
+  renderSaldos(); renderRepairs(); renderListos(); updateBadges();
+  if (document.getElementById('page-ventas').classList.contains('active')) renderVentas();
+  showToast(`💵 Abono de $${monto.toLocaleString()} registrado (${selectedPago})`);
+}
+
+// ══ REPORTE DE VENTAS ══
+let salesHistory = [];
+let ventasFiltro='todo', ventasPage=1;
+const VENTAS_PAGE_SIZE=20;
+
+function setVentasFiltro(f,btn){
+  ventasFiltro=f; ventasPage=1;
+  document.querySelectorAll('#page-ventas .btn').forEach(b=>{ b.style.background=''; b.style.color=''; b.style.borderColor=''; });
+  btn.style.background='rgba(249,115,22,0.18)'; btn.style.color='#f97316'; btn.style.borderColor='rgba(249,115,22,0.35)';
+  renderVentas();
+}
+function getVentasFiltradas(){
+  const today=new Date(); today.setHours(0,0,0,0);
+  const hoy=today.toISOString().slice(0,10);
+  const lunes=new Date(today); lunes.setDate(today.getDate()-((today.getDay()||7)-1));
+  const lunesStr=lunes.toISOString().slice(0,10);
+  const mesStr=hoy.slice(0,7);
+  return salesHistory.filter(v=>{
+    if(ventasFiltro==='hoy')    return v.fecha===hoy;
+    if(ventasFiltro==='semana') return v.fecha>=lunesStr;
+    if(ventasFiltro==='mes')    return v.fecha.startsWith(mesStr);
+    return true;
+  });
+}
+let kpiDetalle = null; // null | 'total' | 'cobrado' | 'pendiente' | 'cantidad'
+
+function renderVentas(){ renderVentasKPIs(); renderVentasCharts(); renderVentasTabla(); }
+
+function renderVentasKPIs(){
+  const d=getVentasFiltradas();
+  const tv=d.reduce((s,v)=>s+v.total,0), tc=d.reduce((s,v)=>s+v.cobrado,0), tp=d.reduce((s,v)=>s+v.pendiente,0);
+  const kpis=[
+    ['💰','Total facturado','$'+tv.toLocaleString(),'#f97316','total'],
+    ['✅','Cobrado',         '$'+tc.toLocaleString(),'#10b981','cobrado'],
+    ['⏳','Por cobrar',      '$'+tp.toLocaleString(),'#f59e0b','pendiente'],
+    ['🧾','Nº ventas',       d.length,               '#3b82f6','cantidad'],
+  ];
+  document.getElementById('ventas-kpis').innerHTML=kpis.map(([ic,lb,vl,cl,key])=>{
+    const active = kpiDetalle===key;
+    return `<div onclick="toggleKpiDetalle('${key}')" style="background:#111827;border:1px solid ${active?cl:'#1e2d3d'};border-left:3px solid ${cl};border-radius:12px;padding:16px;cursor:pointer;transition:all 0.15s;${active?`box-shadow:0 0 0 2px ${cl}44`:''}" onmouseover="this.style.borderColor='${cl}'" onmouseout="this.style.borderColor='${active?cl:'#1e2d3d'}'">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div style="font-size:22px">${ic}</div>
+        <div style="font-size:10px;color:${cl};font-weight:700;background:${cl}18;border-radius:20px;padding:2px 8px">${active?'▲ ACTIVO':'Ver detalle'}</div>
+      </div>
+      <div style="font-weight:800;font-size:22px;color:${cl};margin-top:6px">${vl}</div>
+      <div style="font-size:11px;color:#4b5563;margin-top:4px;font-weight:600">${lb.toUpperCase()}</div>
+    </div>`;
+  }).join('');
+
+  // Panel de detalle justo debajo de los KPIs
+  const existing = document.getElementById('kpi-detalle-panel');
+  if (existing) existing.remove();
+  if (!kpiDetalle) return;
+
+  const config = {
+    total:    { titulo:'💰 Total Facturado', color:'#f97316', filtro: v=>true,        col:'total',   label:'Total' },
+    cobrado:  { titulo:'✅ Ventas Cobradas',  color:'#10b981', filtro: v=>v.cobrado>0,  col:'cobrado', label:'Cobrado' },
+    pendiente:{ titulo:'⏳ Saldos por Cobrar',color:'#f59e0b', filtro: v=>v.pendiente>0,col:'pendiente',label:'Pendiente' },
+    cantidad: { titulo:'🧾 Todas las Ventas', color:'#3b82f6', filtro: v=>true,        col:'total',   label:'Total' },
+  };
+  const cfg = config[kpiDetalle];
+  const items = d.filter(cfg.filtro).sort((a,b)=>b[cfg.col]-a[cfg.col]);
+  const sumVal = items.reduce((s,v)=>s+v[cfg.col],0);
+
+  const panel = document.createElement('div');
+  panel.id = 'kpi-detalle-panel';
+  panel.style.cssText = `background:#111827;border:1px solid ${cfg.color}44;border-top:3px solid ${cfg.color};border-radius:14px;padding:20px;margin-bottom:20px;animation:fadeIn .2s ease`;
+
+  panel.innerHTML = `
+    <style>@keyframes fadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}</style>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div>
+        <div style="font-weight:800;font-size:16px;color:${cfg.color}">${cfg.titulo}</div>
+        <div style="font-size:12px;color:#64748b;margin-top:2px">${items.length} registro${items.length!==1?'s':''} · Total: <strong style="color:${cfg.color}">${kpiDetalle==='cantidad'?items.length:'$'+sumVal.toLocaleString()}</strong></div>
+      </div>
+      <button onclick="toggleKpiDetalle(null)" style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);color:#ef4444;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:700">✕ Cerrar</button>
+    </div>
+    ${items.length===0
+      ? `<div style="text-align:center;color:#4b5563;padding:30px">Sin registros en este período</div>`
+      : `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+          <thead><tr>
+            <th style="text-align:left;padding:8px 12px;font-size:10px;color:#4b5563;font-weight:700;letter-spacing:1px;border-bottom:1px solid #1e2d3d;text-transform:uppercase">Fecha</th>
+            <th style="text-align:left;padding:8px 12px;font-size:10px;color:#4b5563;font-weight:700;letter-spacing:1px;border-bottom:1px solid #1e2d3d;text-transform:uppercase">Cliente</th>
+            <th style="text-align:left;padding:8px 12px;font-size:10px;color:#4b5563;font-weight:700;letter-spacing:1px;border-bottom:1px solid #1e2d3d;text-transform:uppercase">Descripción</th>
+            <th style="text-align:left;padding:8px 12px;font-size:10px;color:#4b5563;font-weight:700;letter-spacing:1px;border-bottom:1px solid #1e2d3d;text-transform:uppercase">Tipo</th>
+            <th style="text-align:right;padding:8px 12px;font-size:10px;color:#4b5563;font-weight:700;letter-spacing:1px;border-bottom:1px solid #1e2d3d;text-transform:uppercase">Total</th>
+            <th style="text-align:right;padding:8px 12px;font-size:10px;color:#4b5563;font-weight:700;letter-spacing:1px;border-bottom:1px solid #1e2d3d;text-transform:uppercase">Cobrado</th>
+            <th style="text-align:right;padding:8px 12px;font-size:10px;color:#4b5563;font-weight:700;letter-spacing:1px;border-bottom:1px solid #1e2d3d;text-transform:uppercase">Pendiente</th>
+            <th style="text-align:left;padding:8px 12px;font-size:10px;color:#4b5563;font-weight:700;letter-spacing:1px;border-bottom:1px solid #1e2d3d;text-transform:uppercase">Estado</th>
+            <th style="padding:8px 12px;border-bottom:1px solid #1e2d3d"></th>
+          </tr></thead>
+          <tbody>
+            ${items.map(v=>{
+              const ec={'Pagado':'#10b981','Anticipo':'#f59e0b','Pendiente':'#ef4444'};
+              const sc=ec[v.estado]||'#6b7280';
+              const tc=v.tipo==='Reparación'?'#3b82f6':'#f97316';
+              const hl = v[cfg.col]>0 && kpiDetalle!=='cantidad' ? `background:${cfg.color}10` : '';
+              return `<tr style="${hl}">
+                <td style="padding:10px 12px;font-size:12px;border-bottom:1px solid #161f2e">
+                  <div style="font-weight:600">${v.fecha}</div><div style="font-size:10px;color:#4b5563">${v.hora}</div>
+                </td>
+                <td style="padding:10px 12px;font-size:13px;border-bottom:1px solid #161f2e">
+                  <div style="font-weight:700">${v.cliente}</div><div style="font-size:11px;color:#4b5563">${v.telefono||'—'}</div>
+                </td>
+                <td style="padding:10px 12px;font-size:12px;color:#9ca3af;border-bottom:1px solid #161f2e;max-width:200px">${v.descripcion}</td>
+                <td style="padding:10px 12px;border-bottom:1px solid #161f2e"><span style="background:${tc}22;color:${tc};border:1px solid ${tc}44;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600">${v.tipo}</span></td>
+                <td style="padding:10px 12px;text-align:right;font-weight:800;color:#f97316;border-bottom:1px solid #161f2e">$${v.total.toLocaleString()}</td>
+                <td style="padding:10px 12px;text-align:right;color:#10b981;font-weight:700;border-bottom:1px solid #161f2e">$${v.cobrado.toLocaleString()}</td>
+                <td style="padding:10px 12px;text-align:right;color:${v.pendiente>0?'#f59e0b':'#10b981'};font-weight:700;border-bottom:1px solid #161f2e">$${v.pendiente.toLocaleString()}</td>
+                <td style="padding:10px 12px;border-bottom:1px solid #161f2e"><span style="background:${sc}22;color:${sc};border:1px solid ${sc}44;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600">${v.estado}</span></td>
+                <td style="padding:10px 12px;border-bottom:1px solid #161f2e"><button onclick="deleteVenta(${v.id})" style="background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:6px;padding:4px 9px;cursor:pointer;font-size:12px">🗑</button></td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+          <tfoot>
+            <tr style="background:#0d1117">
+              <td colspan="4" style="padding:12px;font-weight:800;font-size:13px;color:#64748b">TOTALES</td>
+              <td style="padding:12px;text-align:right;font-weight:800;color:#f97316">$${items.reduce((s,v)=>s+v.total,0).toLocaleString()}</td>
+              <td style="padding:12px;text-align:right;font-weight:800;color:#10b981">$${items.reduce((s,v)=>s+v.cobrado,0).toLocaleString()}</td>
+              <td style="padding:12px;text-align:right;font-weight:800;color:#f59e0b">$${items.reduce((s,v)=>s+v.pendiente,0).toLocaleString()}</td>
+              <td></td><td></td>
+            </tr>
+          </tfoot>
+        </table></div>`
+    }`;
+
+  // Insert after kpis div
+  const kpisEl = document.getElementById('ventas-kpis');
+  kpisEl.insertAdjacentElement('afterend', panel);
+}
+
+function toggleKpiDetalle(key) {
+  kpiDetalle = kpiDetalle===key ? null : key;
+  renderVentasKPIs();
+}
+function renderVentasCharts(){
+  if(typeof Chart==='undefined') return;
+  const d=getVentasFiltradas();
+  // Barras por día
+  const pd={};
+  d.forEach(v=>{ pd[v.fecha]=(pd[v.fecha]||0)+v.cobrado; });
+  const dias=Object.keys(pd).sort();
+  const c1=document.getElementById('chart-ingresos');
+  if(c1._ch) c1._ch.destroy();
+  c1._ch=new Chart(c1,{ type:'bar', data:{ labels:dias.map(d=>{ const[,m,dd]=d.split('-');return `${dd}/${m}`;}), datasets:[{data:dias.map(d=>pd[d]),backgroundColor:'rgba(249,115,22,0.7)',borderColor:'#f97316',borderWidth:1,borderRadius:6}] }, options:{ plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:'#64748b',font:{size:11}},grid:{color:'#1e2d3d'}}, y:{ticks:{color:'#64748b',font:{size:11},callback:v=>'$'+v.toLocaleString()},grid:{color:'#1e2d3d'}} }, responsive:true } });
+  // Dona por tipo
+  const pt={};
+  d.forEach(v=>{ pt[v.tipo]=(pt[v.tipo]||0)+v.total; });
+  const tl=Object.keys(pt);
+  const c2=document.getElementById('chart-tipo');
+  if(c2._ch) c2._ch.destroy();
+  if(tl.length) c2._ch=new Chart(c2,{ type:'doughnut', data:{ labels:tl, datasets:[{data:tl.map(t=>pt[t]),backgroundColor:['#f97316','#3b82f6','#10b981','#8b5cf6','#f59e0b'],borderWidth:0,hoverOffset:6}] }, options:{ plugins:{legend:{position:'bottom',labels:{color:'#9ca3af',font:{size:12},padding:14}}}, responsive:true, cutout:'65%' } });
+}
+function renderVentasTabla(){
+  const q=(document.getElementById('search-ventas')||{value:''}).value.toLowerCase();
+  let d=getVentasFiltradas();
+  if(q) d=d.filter(v=>v.cliente.toLowerCase().includes(q)||v.descripcion.toLowerCase().includes(q));
+  d=[...d].reverse();
+  const total=d.length, pages=Math.max(1,Math.ceil(total/VENTAS_PAGE_SIZE));
+  if(ventasPage>pages) ventasPage=pages;
+  const start=(ventasPage-1)*VENTAS_PAGE_SIZE;
+  const page=d.slice(start,start+VENTAS_PAGE_SIZE);
+  const ec={'Pagado':'#10b981','Anticipo':'#f59e0b','Pendiente':'#ef4444'};
+  document.getElementById('ventas-tabla').innerHTML=page.map(v=>{
+    const c=ec[v.estado]||'#6b7280';
+    const tc=v.tipo==='Reparación'?'#3b82f6':'#f97316';
+    return `<tr>
+      <td style="color:#4b5563;font-weight:700">#${v.id}</td>
+      <td><div style="font-weight:600;font-size:13px">${v.fecha}</div><div style="font-size:11px;color:#4b5563">${v.hora}</div></td>
+      <td><div style="font-weight:600">${v.cliente}</div><div style="font-size:11px;color:#4b5563">${v.telefono||'—'}</div></td>
+      <td style="font-size:12px;color:#9ca3af;max-width:220px">${v.descripcion}</td>
+      <td><span class="badge" style="background:${tc}22;color:${tc};border:1px solid ${tc}44">${v.tipo}</span></td>
+      <td style="font-weight:800;color:#f97316">$${v.total.toLocaleString()}</td>
+      <td style="color:#10b981;font-weight:700">$${v.cobrado.toLocaleString()}</td>
+      <td style="color:${v.pendiente>0?'#f59e0b':'#10b981'};font-weight:700">$${v.pendiente.toLocaleString()}</td>
+      <td><span class="badge" style="background:${c}22;color:${c};border:1px solid ${c}44">${v.estado}</span></td>
+      <td><button class="btn btn-danger btn-sm" onclick="deleteVenta(${v.id})" title="Eliminar venta">🗑</button></td>
+    </tr>`;
+  }).join('')||'<tr><td colspan="10" class="empty">Sin ventas en este período</td></tr>';
+  document.getElementById('ventas-pagination').innerHTML=`<span>Mostrando ${total===0?0:start+1}–${Math.min(start+VENTAS_PAGE_SIZE,total)} de ${total} ventas</span>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-sm" onclick="ventasPage=Math.max(1,ventasPage-1);renderVentasTabla()" ${ventasPage<=1?'disabled':''}>← Ant</button>
+      <span style="padding:4px 10px;background:#1e2433;border-radius:6px;font-size:12px">${ventasPage}/${pages}</span>
+      <button class="btn btn-sm" onclick="ventasPage=Math.min(${pages},ventasPage+1);renderVentasTabla()" ${ventasPage>=pages?'disabled':''}>Sig →</button>
+    </div>`;
+}
+
+function deleteVenta(id){
+  if(!confirm('¿Eliminar esta venta del reporte?')) return;
+  salesHistory = salesHistory.filter(v => v.id !== id);
+  syncDelete('salesHistory', id);
+  kpiDetalle = null;
+  renderVentas();
+  showToast('🗑 Venta eliminada');
+}
+
+// ══ EXCEL IMPORT ══
+function importExcel(input){
+  const file=input.files[0]; if(!file) return;
+  input.value='';
+  const st=document.getElementById('import-status');
+  st.style.display='block';
+  st.innerHTML=`<div style="background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.3);border-radius:10px;padding:12px;color:#3b82f6">⏳ Procesando <strong>${file.name}</strong>...</div>`;
+  const processCSV=(text)=>{
+    try{
+      const rows=parseCSVText(text);
+      if(rows.length<2) throw new Error('Archivo sin datos');
+      const headers=rows[0].map(h=>h.toLowerCase().trim());
+      const cm={
+        codigo:   findCol(headers,['codigo','código','clave','sku','id']),
+        nombre:   findCol(headers,['descripcion','descripción','nombre','producto','articulo','artículo']),
+        costo:    findCol(headers,['precio costo','costo','p. costo','precio_costo']),
+        venta:    findCol(headers,['precio venta','venta','p. venta','precio_venta','precio de venta']),
+        categoria:findCol(headers,['departamento','categoria','categoría','tipo','category','depto']),
+        stock:    findCol(headers,['existencia','existencias','stock','cantidad','qty']),
+      };
+      let imp=0,upd=0,skip=0,nextId=Math.max(...products.map(p=>p.id),0)+1;
+      for(let i=1;i<rows.length;i++){
+        const row=rows[i]; if(!row.length||row.every(c=>!c)) continue;
+        const nombre=(cm.nombre>=0?row[cm.nombre]||'':'').trim(); if(!nombre){skip++;continue;}
+        const codigo=String(cm.codigo>=0&&row[cm.codigo]?row[cm.codigo]:nextId).trim();
+        const precio=parseFloat(String(cm.venta>=0?row[cm.venta]||0:0).replace(/[^0-9.]/g,''))||0;
+        const precioCosto=parseFloat(String(cm.costo>=0?row[cm.costo]||0:0).replace(/[^0-9.]/g,''))||0;
+        const categoria=(cm.categoria>=0?row[cm.categoria]||'General':'General').trim()||'General';
+        const stock=parseInt(String(cm.stock>=0?row[cm.stock]||0:0).replace(/[^0-9]/g,''))||0;
+        const ex=products.find(p=>String(p.codigo)===codigo||p.nombre.toLowerCase()===nombre.toLowerCase());
+        if(ex){ex.nombre=nombre;ex.precio=precio;ex.precioCosto=precioCosto;ex.categoria=categoria;ex.stock=stock;upd++;}
+        else{products.push({id:nextId++,codigo,nombre,categoria,precio,precioCosto,stock});imp++;}
+      }
+      st.innerHTML=`<div style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:10px;padding:14px">
+        <div style="font-weight:700;color:#10b981;margin-bottom:8px">✅ Importación completada — ${file.name}</div>
+        <div style="display:flex;gap:20px;font-size:13px;flex-wrap:wrap">
+          <span>🆕 <strong style="color:#10b981">${imp}</strong> nuevos</span>
+          <span>🔄 <strong style="color:#3b82f6">${upd}</strong> actualizados</span>
+          <span>⏭ <strong style="color:#64748b">${skip}</strong> omitidos</span>
+          <span>📦 <strong style="color:#f97316">${products.length}</strong> total</span>
+        </div></div>`;
+      invPage=1; renderInventory(); renderProducts(); updateBadges();
+      setTimeout(()=>st.style.display='none',8000);
+    }catch(err){ st.innerHTML=`<div style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:10px;padding:12px;color:#ef4444">❌ Error: ${err.message}</div>`; }
+  };
+  const doXLS=()=>{ const r=new FileReader(); r.onload=e=>{ try{ const wb=XLSX.read(e.target.result,{type:'binary'}); processCSV(XLSX.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]])); }catch(err){ st.innerHTML=`<div style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:10px;padding:12px;color:#ef4444">❌ ${err.message}</div>`; } }; r.readAsBinaryString(file); };
+  if(file.name.toLowerCase().endsWith('.csv')){ const r=new FileReader(); r.onload=e=>processCSV(e.target.result); r.readAsText(file,'UTF-8'); }
+  else if(typeof XLSX!=='undefined'){ doXLS(); }
+  else{ const s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; s.onload=doXLS; s.onerror=()=>st.innerHTML=`<div style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:10px;padding:12px;color:#ef4444">❌ Sin conexión. Convierte a CSV e intenta de nuevo.</div>`; document.head.appendChild(s); }
+}
+function findCol(h,n){ for(const x of n){ const i=h.findIndex(c=>c.includes(x)); if(i>=0) return i; } return -1; }
+function parseCSVText(text){ return text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n').map(line=>{ const cols=[];let cur='',inQ=false; for(let i=0;i<line.length;i++){ const c=line[i]; if(c==='"'){inQ=!inQ;}else if(c===','&&!inQ){cols.push(cur.trim());cur='';}else cur+=c; } cols.push(cur.trim()); return cols; }); }
+function exportTemplate(){ const csv='Codigo,Descripcion,Precio Costo,Precio Venta,Departamento,Existencia\n1001,PANTALLA IPHONE 15,750,1800,Pantallas,5\n1002,BATERIA SAMSUNG A52,250,800,Baterias,10\n'; const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download='plantilla_inventario.csv'; a.click(); }
+
+// ══ INIT ══
+function renderAll(){ renderProducts(); renderInventory(); renderRepairs(); renderListos(); renderSaldos(); updateBadges(); }
+
+// Guardar helpers — sincronizan con Firebase si está disponible
+function syncSave(col, id, data){ if(window.fbSave) window.fbSave(col, id, data); }
+function syncDelete(col, id){ if(window.fbDelete) window.fbDelete(col, id); }
+
+// Cargar Chart.js y arrancar
+(function(){ const s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js'; s.onload=renderAll; s.onerror=renderAll; document.head.appendChild(s); })();
+document.getElementById('ticket-date').textContent=new Date().toLocaleDateString('es-MX',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+</script>
+</body>
+</html>
